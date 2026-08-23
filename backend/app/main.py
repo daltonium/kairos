@@ -12,7 +12,12 @@ from app.api.v1 import (
     mentors, companies, payments, notifications, admin,
 )
 
+from starlette.middleware.sessions import SessionMiddleware
+
+
 app = FastAPI(title="Kairos API", version="0.1.0")
+
+app.add_middleware(SessionMiddleware, secret_key=settings.JWT_SECRET)
 
 app.add_middleware(
     CORSMiddleware,
