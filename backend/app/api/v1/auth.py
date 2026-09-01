@@ -73,7 +73,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Account is disabled")
 
     return TokenResponse(
-        access_token=create_access_token(user.id, user.role),
+        access_token=create_access_token(user.id, user.role, user.is_admin),
         refresh_token=create_refresh_token(user.id),
     )
 
@@ -90,7 +90,7 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
     return TokenResponse(
-        access_token=create_access_token(user.id, user.role),
+        access_token=create_access_token(user.id, user.role, user.is_admin),
         refresh_token=create_refresh_token(user.id),
     )
 
@@ -138,6 +138,6 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     return TokenResponse(
-        access_token=create_access_token(user.id, user.role),
+        access_token=create_access_token(user.id, user.role, user.is_admin),
         refresh_token=create_refresh_token(user.id),
     )

@@ -1,6 +1,11 @@
 """
 backend/app/core/deps.py
-FastAPI dependencies: current user extraction + role-based access control.
+REPLACES the Phase 3 version.
+Change: require_role() now treats "admin" specially — a token with
+is_admin=True satisfies ANY require_role(...) check, on top of also
+satisfying its own primary role. This lets one test account act as both
+student and admin without a role-conflict, while keeping real users
+single-primary-role.
 """
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -39,11 +44,27 @@ async def get_current_user(
 
 
 def require_role(*allowed_roles: str):
+    """
+    Grants access if EITHER:
+    - the user's primary role is in allowed_roles, OR
+    - the user has is_admin=True (admins can access any role-gated route)
+    Exception: require_role("admin") alone still strictly requires is_admin=True,
+    it doesn't get bypassed by itself.
+    """
     async def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires one of roles: {allowed_roles}",
-            )
-        return current_user
+        is_admin_only_check = set(allowed_roles) == {"admin"}
+
+        if current_user.role in allowed_roles:
+            return current_user
+
+        if not is_admin_only_check and current_user.is_admin:
+            return current_user
+
+        if is_admin_only_check and current_user.is_admin:
+            return current_user
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Requires one of roles: {allowed_roles}",
+        )
     return role_checker

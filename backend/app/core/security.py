@@ -1,6 +1,9 @@
 """
 backend/app/core/security.py
-Argon2 password hashing + JWT creation/verification.
+REPLACES the Phase 3 version.
+Change: create_access_token now also embeds is_admin, so a token carries
+BOTH the primary role (student/mentor/company) AND whether this user
+additionally has admin privileges — no schema change to `role` needed.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -29,9 +32,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-def create_access_token(subject: str, role: str) -> str:
+def create_access_token(subject: str, role: str, is_admin: bool = False) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": subject, "role": role, "type": "access", "exp": expire}
+    payload = {"sub": subject, "role": role, "is_admin": is_admin, "type": "access", "exp": expire}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=ALGORITHM)
 
 
