@@ -273,6 +273,11 @@ async def client_review_submission(
     if payload.approve:
         application.status = "completed"
         gig.status = "completed"
+        from app.services.portfolio import add_portfolio_item
+        await add_portfolio_item(
+            db, application.student_id, "gig", gig.id, gig.title,
+            description=gig.description, rating=float(payload.rating),
+        )
         # Phase 10 (Payments) hooks in here: trigger Razorpay payout on approval.
 
     await db.commit()
