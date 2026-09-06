@@ -3,6 +3,8 @@ backend/app/main.py
 FastAPI application factory — Phase 2 skeleton.
 Run with: uvicorn app.main:app --reload --port 8000
 """
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -34,18 +36,32 @@ app = FastAPI(
 
 app.add_middleware(SessionMiddleware, secret_key=settings.JWT_SECRET)
 
+
+# Build allowed origins from environment variable, with sensible defaults
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        ",".join(
+            [
+                "http://127.0.0.1:5500",
+                "http://localhost:5500",
+                "http://127.0.0.1:8000",
+                "http://localhost:8000",
+            ]
+        ),
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5500",   # VS Code Live Server default
-        "http://127.0.0.1:5500",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
+
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
