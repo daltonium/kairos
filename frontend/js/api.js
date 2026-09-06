@@ -4,7 +4,7 @@
   const API_BASE_URL =
     window.KAIROS_API_URL ||
     localStorage.getItem("kairos_api_url") ||
-    "https://kairos-backend.onrender.com";
+    "https://kairos-o6a1.onrender.com";
 
   const API = {
     auth: {
