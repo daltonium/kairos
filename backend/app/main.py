@@ -40,17 +40,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.JWT_SECRET)
 # Build allowed origins from environment variable, with sensible defaults
 allowed_origins = [
     origin.strip()
-    for origin in os.getenv(
-        "CORS_ORIGINS",
-        ",".join(
-            [
-                "http://127.0.0.1:5500",
-                "http://localhost:5500",
-                "http://127.0.0.1:8000",
-                "http://localhost:8000",
-            ]
-        ),
-    ).split(",")
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
     if origin.strip()
 ]
 
