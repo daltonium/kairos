@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_S3_BUCKET: str = ""
     AWS_REGION: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
 
     class Config:
         env_file = ".env"

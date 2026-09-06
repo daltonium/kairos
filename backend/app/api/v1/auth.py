@@ -57,6 +57,8 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    from app.services.email import send_welcome_email
+    await send_welcome_email(user.email, user.full_name)
     return user
 
 

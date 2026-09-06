@@ -1,35 +1,64 @@
 """
-backend/app/services/ai/throttle.py
-Redis-backed caching + daily usage counter for OpenRouter calls.
-Essential given the free-tier cap (20 req/min, 50-1000 req/day).
+Redis-backed caching and daily OpenRouter usage tracking.
+
+Important: Redis is created lazily instead of at import time. A global
+async Redis client may retain connections bound to a closed pytest event
+loop, especially on Windows with the Proactor event loop.
 """
-import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as redis_async
 
 from app.core.config import settings
-from app.services.ai.client import call_openrouter, RateLimitExceeded
+from app.services.ai.client import RateLimitExceeded, call_openrouter
 
-_redis = redis_async.from_url(settings.REDIS_URL, decode_responses=True)
+DAILY_LIMIT_WARNING_THRESHOLD = 45
 
-DAILY_LIMIT_WARNING_THRESHOLD = 45  # warn/soft-block before hitting the real 50/day free cap
+_redis_client: redis_async.Redis | None = None
 
 
-def _seconds_until_midnight_utc() -> int:
+def get_redis() -> redis_async.Redis:
+    """Return one lazily initialized Redis client for the active process."""
+    global _redis_client
+
+    if _redis_client is None:
+        _redis_client = redis_async.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            health_check_interval=30,
+        )
+
+    return _redis_client
+
+
+async def close_redis() -> None:
+    """Close Redis cleanly during application shutdown and test teardown."""
+    global _redis_client
+
+    if _redis_client is not None:
+        await _redis_client.aclose()
+        _redis_client = None
+
+
+def seconds_until_midnight_utc() -> int:
     now = datetime.now(timezone.utc)
-    tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    tomorrow = tomorrow.replace(day=now.day) 
-    from datetime import timedelta
-    tomorrow = tomorrow + timedelta(days=1)
+    tomorrow = (now + timedelta(days=1)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
     return int((tomorrow - now).total_seconds())
 
 
-async def _increment_daily_usage() -> int:
+async def increment_daily_usage() -> int:
+    redis = get_redis()
     key = f"openrouter:usage:{datetime.now(timezone.utc).date().isoformat()}"
-    count = await _redis.incr(key)
+
+    count = await redis.incr(key)
     if count == 1:
-        await _redis.expire(key, _seconds_until_midnight_utc())
+        await redis.expire(key, seconds_until_midnight_utc())
+
     return count
 
 
@@ -40,17 +69,36 @@ async def cached_or_call(
     ttl: int = 86400,
     json_mode: bool = False,
 ) -> str:
-    cached = await _redis.get(cache_key)
-    if cached is not None:
-        return cached
+    redis = get_redis()
 
-    usage_today = await _increment_daily_usage()
-    if usage_today > DAILY_LIMIT_WARNING_THRESHOLD:
-        raise RateLimitExceeded(
-            f"Approaching OpenRouter free-tier daily limit ({usage_today} calls today). "
-            "Try again tomorrow or after upgrading."
+    try:
+        cached = await redis.get(cache_key)
+        if cached is not None:
+            return cached
+
+        usage_today = await increment_daily_usage()
+        if usage_today > DAILY_LIMIT_WARNING_THRESHOLD:
+            raise RateLimitExceeded(
+                f"Approaching OpenRouter free-tier daily limit: "
+                f"{usage_today} calls today."
+            )
+
+        result = await call_openrouter(
+            model=model,
+            messages=messages,
+            json_mode=json_mode,
         )
 
-    result = await call_openrouter(model, messages, json_mode=json_mode)
-    await _redis.set(cache_key, result, ex=ttl)
-    return result
+        await redis.set(cache_key, result, ex=ttl)
+        return result
+
+    except RateLimitExceeded:
+        raise
+    except Exception:
+        # Cache/usage infrastructure must not make an AI endpoint return 500.
+        # Continue with the real provider call; the caller handles provider failures.
+        return await call_openrouter(
+            model=model,
+            messages=messages,
+            json_mode=json_mode,
+        )

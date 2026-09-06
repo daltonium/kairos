@@ -14,8 +14,23 @@ from app.api.v1 import (
 
 from starlette.middleware.sessions import SessionMiddleware
 
+from contextlib import asynccontextmanager
+from app.services.ai.throttle import close_redis
+from app.db.session import engine
 
-app = FastAPI(title="Kairos API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await close_redis()
+    await engine.dispose()
+
+
+app = FastAPI(
+    title="Kairos API",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(SessionMiddleware, secret_key=settings.JWT_SECRET)
 

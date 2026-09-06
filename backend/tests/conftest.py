@@ -1,18 +1,14 @@
 """
 backend/tests/conftest.py
-FINAL VERSION -- replaces all earlier attempts.
+REPLACES the previous version (the asyncio.sleep(0.3) attempt was NOT
+enough -- AI review + Redis-backed calls can take longer than that,
+especially on cold OpenRouter/Upstash connections).
 
-Root cause of "attached to a different loop": app/db/session.py creates
-the SQLAlchemy engine at MODULE IMPORT TIME, binding its connection pool
-to whichever event loop exists then. pytest-asyncio then runs each test
-on its own loop, so later tests get connections bound to a stale loop.
-
-Fix: don't fight pytest-asyncio's loop scoping. Instead, give the test
-suite its OWN engine using NullPool (no connection reuse across calls,
-so there's nothing to get bound to a stale loop) and override FastAPI's
-get_db dependency to use it. The app's production engine in db/session.py
-is untouched.
+Fix: instead of guessing a sleep duration, explicitly gather() every
+pending asyncio task (minus the current one) before disposing the
+engine. This waits exactly as long as needed, no more, no less.
 """
+import asyncio
 import uuid
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -28,7 +24,7 @@ BASE_URL = "http://test"
 test_engine = create_async_engine(
     settings.DATABASE_URL,
     connect_args={"statement_cache_size": 0},
-    poolclass=NullPool,  # no persistent pool -> no connection tied to a stale loop
+    poolclass=NullPool,
 )
 TestSessionLocal = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -41,12 +37,40 @@ async def _get_test_db():
 app.dependency_overrides[get_db] = _get_test_db
 
 
+async def _drain_background_tasks(timeout: float = 15.0):
+    """Wait for any FastAPI BackgroundTasks (AI review, Redis calls,
+    email sends) spawned by the just-finished request to actually
+    complete, instead of guessing a fixed sleep duration."""
+    current = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    if pending:
+        try:
+            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
+
+
+from app.services.ai.throttle import close_redis
+
+
 @pytest_asyncio.fixture
 async def client():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url=BASE_URL) as ac:
+
+    async with AsyncClient(
+        transport=transport,
+        base_url=BASE_URL,
+    ) as ac:
         yield ac
+
+    await close_redis()
     await test_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session():
+    async with TestSessionLocal() as session:
+        yield session
 
 
 async def _register_and_login(client: AsyncClient, role: str) -> dict:
