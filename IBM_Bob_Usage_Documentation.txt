@@ -1,0 +1,254 @@
+===============================================================
+ IBM BOB TECHNOLOGY USAGE DOCUMENTATION
+ Project: Kairos — Learn, Build, Get Hired
+===============================================================
+
+1. OVERVIEW
+---------------------------------------------------------------
+IBM Bob was used as the primary AI-powered Software Development
+Lifecycle (SDLC) partner throughout the development of Kairos,
+an AI-enabled career growth platform connecting students,
+mentors, and companies through learning, mentorship, verified
+skills, portfolios, gigs, jobs, and payments.
+
+Rather than using AI only to generate isolated code snippets,
+IBM Bob was engaged across the full development lifecycle:
+planning, backend implementation, AI workflow design, debugging,
+automated testing, frontend-backend integration, and deployment
+to production (Render + Vercel + Supabase + Upstash).
+
+This document explains, phase by phase, how IBM Bob was used,
+what workflows it supported, and what outcomes it produced.
+
+
+2. PLANNING AND ARCHITECTURE DESIGN
+---------------------------------------------------------------
+IBM Bob was used in Plan Mode to break down the Kairos platform
+into 12 sequential development phases:
+
+  Phase 0  - Local environment, Supabase, Redis, OpenRouter setup
+  Phase 1  - Database schema design and Alembic migrations
+  Phase 2  - FastAPI backend skeleton
+  Phase 3  - Authentication (JWT, Google OAuth, Argon2 hashing)
+  Phase 4  - Onboarding and user profiles
+  Phase 5  - AI Roadmap Engine (OpenRouter reasoning model)
+  Phase 5.5- AI rate-limit contingency (Redis cache/throttle)
+  Phase 6  - Learning and skill verification (OpenRouter code model)
+  Phase 7  - Gig marketplace
+  Phase 8  - Portfolio and resume builder
+  Phase 9  - Mentor and company portals + automated testing
+  Phase 10 - Payments (Razorpay), email (Resend), notifications
+  Phase 11 - Full frontend build-out
+  Phase 12 - Deployment (Render + Vercel)
+
+IBM Bob helped identify feature dependencies before
+implementation began. For example:
+  - Skill badges had to exist before skill-gated gigs could
+    filter eligible students.
+  - Portfolio items required completed gigs/projects as their
+    data source.
+  - Authentication had to be complete before role-based mentor,
+    company, and admin routes could be secured.
+
+This dependency-aware planning reduced rework during later
+phases and kept the FastAPI route structure, database schema,
+and frontend page list consistent with each other.
+
+
+3. BACKEND DEVELOPMENT
+---------------------------------------------------------------
+IBM Bob was used in Agent/Code Mode to scaffold and refine the
+FastAPI backend, including:
+
+  - API routers for auth, users, roadmaps, learning, gigs,
+    mentors, companies, payments, notifications, and admin
+  - Pydantic request/response schemas
+  - SQLAlchemy async models (User, Company, Mentor, GigListing,
+    JobListing, Portfolio, Roadmap, Quiz, Payment, Wallet, etc.)
+  - Alembic migrations (29-table initial schema + incremental
+    is_admin flag migration)
+  - Argon2-based password hashing and verification
+  - JWT access/refresh token creation and decoding
+  - Role-based access control (student / mentor / company / admin)
+  - Async database session handling with SQLAlchemy + asyncpg
+  - Redis-backed caching and daily AI usage throttling via Upstash
+  - Razorpay order creation, payment capture, and webhook
+    signature verification
+  - Resend-based transactional email (welcome, gig accepted,
+    payment received)
+  - AWS S3 presigned URL generation for profile photo uploads
+
+IBM Bob maintained consistency with existing naming conventions
+and file structure across all modules, and cross-checked new
+routes against their corresponding Pydantic schemas and
+SQLAlchemy models before finalizing each phase.
+
+
+4. AI WORKFLOW INTEGRATION
+---------------------------------------------------------------
+Kairos includes several AI-powered features:
+
+  - AI Roadmap Engine: generates a personalized, week-by-week
+    learning plan based on interest, skill level, and career goal
+  - AI Project Review: reviews submitted project code/description
+    and returns a structured score + feedback
+  - AI Resume Improvement: rewrites resume bullet points to be
+    more professional and outcome-oriented
+  - AI Applicant Summary: generates a recruiter-facing summary
+    of a job applicant using their skills and portfolio
+
+IBM Bob helped design a consistent, reusable pattern for all
+four AI features:
+
+  1. Build a cache key from the input parameters
+  2. Check Redis for a cached response (cached_or_call)
+  3. If not cached, call OpenRouter with the appropriate model
+     (reasoning model for roadmap/resume, code model for review)
+  4. Track daily usage count in Redis with a soft warning
+     threshold (45 calls) below the free-tier hard cap (50/day)
+  5. Cache the result with an appropriate TTL
+  6. On RateLimitExceeded or AIRequestFailed, return a graceful
+     fallback message instead of a 500 error
+
+IBM Bob also helped design the asynchronous roadmap generation
+flow: the API immediately creates a roadmap row with status
+"generating" and returns HTTP 202 Accepted, while the actual
+OpenRouter call and roadmap item population happen in a
+FastAPI BackgroundTask. The frontend polls the roadmap endpoint
+until status becomes "ready" or "failed."
+
+
+5. DEBUGGING AND ROOT-CAUSE ANALYSIS
+---------------------------------------------------------------
+IBM Bob was used extensively to diagnose and resolve real
+errors encountered during development, including:
+
+  - ModuleNotFoundError caused by a filename/import mismatch
+    between razorpay_service.py (artifact name) and
+    razorpay_client.py (expected import path)
+  - TypeError in Razorpay webhook signature verification caused
+    by passing raw bytes into a function expecting a string
+  - RuntimeError: Event loop is closed in pytest, caused by
+    FastAPI BackgroundTasks (AI review, Redis calls) continuing
+    to execute after the test's event loop had already been
+    torn down
+  - A global, module-level Redis client in throttle.py that
+    persisted stale connections across per-test event loops
+    on Windows' ProactorEventLoop
+  - CORS preflight failures between the Vercel frontend and
+    Render backend caused by a trailing slash mismatch in the
+    CORS_ORIGINS environment variable
+  - 422 validation errors caused by using the reserved ".test"
+    top-level domain in demo email addresses, rejected by
+    Pydantic's EmailStr validator
+  - PostgreSQL foreign-key violation (23503) when a seed script
+    attempted to delete shared "skills" rows still referenced by
+    existing skill_badges records
+
+For each issue, IBM Bob traced the error back to the exact
+source file and line, explained the underlying cause, and
+proposed a targeted fix rather than a broad rewrite — for
+example, replacing a single global Redis client with a lazily
+initialized, properly closable client instead of restructuring
+the entire AI service layer.
+
+
+6. AUTOMATED TESTING
+---------------------------------------------------------------
+IBM Bob supported the stabilization of the Pytest suite across
+test_auth.py, test_gigs.py, test_learning.py,
+test_mentors_companies.py, test_onboarding.py, test_payments.py,
+and test_portfolio.py.
+
+Specific contributions:
+  - Fixed a conftest.py fixture that disposed the test database
+    engine before FastAPI BackgroundTasks had finished executing
+  - Replaced a fixed asyncio.sleep() workaround with a more
+    correct approach: mocking external AI/Redis calls at their
+    import location (app.api.v1.learning.review_project,
+    app.api.v1.companies.improve_resume_section) so tests no
+    longer depend on live network calls or AI quota
+  - Diagnosed a missing @pytest.mark.asyncio marker that caused
+    two async test functions to be collected as synchronous,
+    producing "async def functions are not natively supported"
+  - Helped reach a fully green test suite (30 passed, 0 failed)
+    before production deployment
+
+This testing work ensured that authentication, gig pipelines,
+learning/quiz/project workflows, mentor-company interactions,
+onboarding, payments, and portfolio generation were all verified
+by automated tests prior to going live.
+
+
+7. FRONTEND AND API INTEGRATION
+---------------------------------------------------------------
+IBM Bob guided the integration between the plain HTML5/CSS3/
+vanilla JavaScript frontend and the FastAPI backend:
+
+  - Designed a centralized API client (api.js) with a single
+    configurable API_BASE_URL, avoiding hardcoded backend URLs
+    scattered across the codebase
+  - Implemented JWT storage in localStorage with automatic
+    refresh-token retry logic on HTTP 401 responses
+  - Implemented route guards that redirect unauthenticated users
+    to the login page
+  - Designed role-aware navigation for student, mentor, company,
+    and admin views
+  - Ensured the frontend used real backend API calls rather than
+    mock/fake data, with clear "Backend unavailable" states when
+    the API could not be reached
+  - Enforced a strict constraint that the frontend must use only
+    HTML, CSS, and vanilla JavaScript — no React, Vue, Next.js,
+    or TypeScript — while still producing a polished, responsive,
+    production-quality UI matching a defined color system
+
+
+8. DEPLOYMENT AND PRODUCTION READINESS
+---------------------------------------------------------------
+IBM Bob assisted with deployment configuration and go-live
+verification:
+
+  - Render web service configuration for the FastAPI backend
+    (render.yaml, start command, environment variables)
+  - Vercel static site deployment for the frontend
+  - Production CORS_ORIGINS configuration to allow the deployed
+    Vercel domain while avoiding trailing-slash origin mismatches
+  - Google OAuth authorized redirect URI configuration pointing
+    to the deployed Render backend
+  - Razorpay webhook URL and webhook secret configuration
+  - Verification of /health, /docs, and /openapi.json endpoints
+    post-deployment
+  - Diagnosis of a frontend still pointing at localhost instead
+    of the deployed Render URL after go-live
+  - Supabase SQL seed script design for presentation-ready demo
+    data (student, mentor, company, and second student accounts
+    with roadmaps, badges, gigs, jobs, and payments pre-populated)
+
+
+9. SUMMARY OF OUTCOMES
+---------------------------------------------------------------
+Using IBM Bob as an AI SDLC partner across the Kairos project
+resulted in:
+
+  - A 12-phase backend built with FastAPI, PostgreSQL (Supabase),
+    and Redis (Upstash), fully covering authentication, learning,
+    mentorship, gigs, jobs, payments, and notifications
+  - Four integrated AI features (roadmap generation, project
+    review, resume improvement, applicant summaries) with proper
+    caching, rate-limiting, and graceful degradation
+  - A 30-test automated Pytest suite passing with zero failures
+  - A framework-free, responsive frontend fully wired to live
+    backend APIs
+  - A fully deployed, production-accessible application on
+    Render (backend) and Vercel (frontend), backed by Supabase
+    and Upstash, with working authentication, payments, and
+    AI workflows
+
+IBM Bob functioned as a continuous development partner — not
+just a code generator — supporting planning, implementation,
+debugging, testing, and deployment as one connected workflow
+throughout the Kairos build.
+
+===============================================================
+ END OF DOCUMENT
+===============================================================
