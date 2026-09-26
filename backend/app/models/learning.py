@@ -1,7 +1,6 @@
 """
 backend/app/models/learning.py
 Skills, roadmaps, learning modules, quizzes, projects, badges.
-Used by Phases 5-6 (AI Roadmap Engine, Learning & Skill Verification).
 """
 from typing import Optional
 from sqlalchemy import String, Integer, Text, ForeignKey, Boolean
@@ -15,6 +14,8 @@ class Skill(Base, UUIDPKMixin, TimestampMixin):
 
     name: Mapped[str] = mapped_column(String(100), unique=True)
     category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    badges: Mapped[list["SkillBadge"]] = relationship(back_populates="skill")
 
 
 class UserSkill(Base, UUIDPKMixin, TimestampMixin):
@@ -32,8 +33,8 @@ class Roadmap(Base, UUIDPKMixin, TimestampMixin):
     interest: Mapped[str] = mapped_column(String(100))
     skill_level: Mapped[str] = mapped_column(String(20))
     career_goal: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="generating")  # generating | ready | failed
-    raw_ai_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # cached JSON from OpenRouter
+    status: Mapped[str] = mapped_column(String(20), default="generating")
+    raw_ai_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     items: Mapped[list["RoadmapItem"]] = relationship(back_populates="roadmap")
 
@@ -68,7 +69,7 @@ class ModuleProgress(Base, UUIDPKMixin, TimestampMixin):
 
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     module_id: Mapped[str] = mapped_column(String(36), ForeignKey("learning_modules.id"))
-    status: Mapped[str] = mapped_column(String(20), default="not_started")  # not_started|in_progress|completed
+    status: Mapped[str] = mapped_column(String(20), default="not_started")
 
 
 class Quiz(Base, UUIDPKMixin, TimestampMixin):
@@ -84,9 +85,9 @@ class QuizQuestion(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "quiz_questions"
 
     quiz_id: Mapped[str] = mapped_column(String(36), ForeignKey("quizzes.id"))
-    question_type: Mapped[str] = mapped_column(String(20))  # mcq | code | fill_blank
+    question_type: Mapped[str] = mapped_column(String(20))
     question_text: Mapped[str] = mapped_column(Text)
-    options: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded
+    options: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     correct_answer: Mapped[str] = mapped_column(Text)
 
     quiz: Mapped["Quiz"] = relationship(back_populates="questions")
@@ -108,9 +109,9 @@ class Project(Base, UUIDPKMixin, TimestampMixin):
     module_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("learning_modules.id"), nullable=True)
     github_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     live_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    zip_file_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # S3 key
+    zip_file_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="submitted")  # submitted|ai_reviewed|mentor_approved|rejected
+    status: Mapped[str] = mapped_column(String(20), default="submitted")
 
     reviews: Mapped[list["ProjectReview"]] = relationship(back_populates="project")
 
@@ -119,8 +120,8 @@ class ProjectReview(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "project_reviews"
 
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"))
-    reviewer_type: Mapped[str] = mapped_column(String(10))  # ai | mentor
-    reviewer_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # null if AI
+    reviewer_type: Mapped[str] = mapped_column(String(10))
+    reviewer_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     feedback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
@@ -132,4 +133,6 @@ class SkillBadge(Base, UUIDPKMixin, TimestampMixin):
 
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     skill_id: Mapped[str] = mapped_column(String(36), ForeignKey("skills.id"))
-    status: Mapped[str] = mapped_column(String(20), default="locked")  # locked|pending|verified
+    status: Mapped[str] = mapped_column(String(20), default="locked")
+
+    skill: Mapped["Skill"] = relationship(back_populates="badges")

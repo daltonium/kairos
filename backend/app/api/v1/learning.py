@@ -8,6 +8,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from app.core.deps import get_current_user, require_role
 from app.db.session import get_db, AsyncSessionLocal
@@ -18,9 +19,17 @@ from app.models.learning import (
 from app.schemas.learning import (
     QuizQuestionResponse, QuizSubmitRequest, QuizResultResponse,
     ProjectSubmitRequest, ProjectResponse, ProjectReviewResponse,
-    SkillBadgeResponse, MentorApprovalRequest,
+    MentorApprovalRequest,
 )
 from app.services.ai.code_review import review_project
+
+class BadgeWithSkillResponse(BaseModel):
+    id: str
+    skill_id: str
+    skill_name: str
+    skill_category: str | None = None
+    status: str
+
 
 router = APIRouter()
 
@@ -164,34 +173,54 @@ async def mentor_review_project(
     return review
 
 
-@router.post("/skills/{skill_id}/badge", response_model=SkillBadgeResponse)
+@router.post("/skills/{skill_id}/badge", response_model=BadgeWithSkillResponse)
 async def award_skill_badge(
     skill_id: str,
     current_user: User = Depends(require_role("student")),
     db: AsyncSession = Depends(get_db),
 ):
     skill_result = await db.execute(select(Skill).where(Skill.id == skill_id))
-    if skill_result.scalar_one_or_none() is None:
+    skill = skill_result.scalar_one_or_none()
+    if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
 
     existing = await db.execute(
-        select(SkillBadge).where(SkillBadge.user_id == current_user.id, SkillBadge.skill_id == skill_id)
+        select(SkillBadge).where(
+            SkillBadge.user_id == current_user.id, SkillBadge.skill_id == skill_id
+        )
     )
     badge = existing.scalar_one_or_none()
     if badge is None:
-        badge = SkillBadge(id=str(uuid.uuid4()), user_id=current_user.id, skill_id=skill_id, status="verified")
+        badge = SkillBadge(
+            id=str(uuid.uuid4()), user_id=current_user.id,
+            skill_id=skill_id, status="verified",
+        )
         db.add(badge)
     else:
         badge.status = "verified"
     await db.commit()
     await db.refresh(badge)
-    return badge
+    return BadgeWithSkillResponse(
+        id=badge.id, skill_id=badge.skill_id, skill_name=skill.name,
+        skill_category=skill.category, status=badge.status,
+    )
 
 
-@router.get("/skills/my-badges", response_model=list[SkillBadgeResponse])
+@router.get("/skills/my-badges", response_model=list[BadgeWithSkillResponse])
 async def get_my_badges(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(SkillBadge).where(SkillBadge.user_id == current_user.id))
-    return result.scalars().all()
+    result = await db.execute(
+        select(SkillBadge, Skill)
+        .join(Skill, Skill.id == SkillBadge.skill_id)
+        .where(SkillBadge.user_id == current_user.id)
+        .order_by(Skill.name.asc())
+    )
+    return [
+        BadgeWithSkillResponse(
+            id=badge.id, skill_id=badge.skill_id, skill_name=skill.name,
+            skill_category=skill.category, status=badge.status,
+        )
+        for badge, skill in result.all()
+    ]

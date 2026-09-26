@@ -1,7 +1,7 @@
 """
 backend/app/schemas/learning.py
 """
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -16,7 +16,7 @@ class QuizQuestionResponse(BaseModel):
 
 
 class QuizSubmitRequest(BaseModel):
-    answers: dict[str, str]  # {question_id: submitted_answer}
+    answers: dict[str, str]
 
 
 class QuizResultResponse(BaseModel):
@@ -57,10 +57,9 @@ class ProjectReviewResponse(BaseModel):
 class SkillBadgeResponse(BaseModel):
     id: str
     skill_id: str
+    skill_name: str
+    skill_category: Optional[str] = None
     status: str
-
-    class Config:
-        from_attributes = True
 
 
 class MentorApprovalRequest(BaseModel):
